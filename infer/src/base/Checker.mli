@@ -30,6 +30,7 @@ type t =
   | PurityChecker
   | RacerD
   | ResourceLeakLabExercise
+  | CrossMemAnalysis
   | SILValidation
   | SIOF
   | ScopeLeakage

@@ -188,6 +188,7 @@ let all_checkers =
          in
          [(impurity, Java); (impurity, Clang); (impurity, Hack)] ) }
   ; {checker= Liveness; callbacks= [(intraprocedural Liveness.checker, Clang)]}
+  ; {checker= CrossMemAnalysis; callbacks= [(interprocedural Payloads.Fields.crossmem_analysis CrossMem.checker, Clang)]}
   ; { checker= InefficientKeysetIterator
     ; callbacks= [(intraprocedural InefficientKeysetIterator.checker, Java)] }
   ; { checker= FragmentRetainsView

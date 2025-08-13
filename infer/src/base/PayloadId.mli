@@ -17,6 +17,7 @@ type t =
   | DisjunctiveDemo
   | StaticConstructorStallChecker
   | LabResourceLeaks
+  | CrossMem
   | LithoRequiredProps
   | Pulse
   | Purity

@@ -271,7 +271,8 @@ let pp f
      ; ret_type
      ; ret_annots
      ; is_ret_type_pod
-     ; is_ret_constexpr }
+     ; is_ret_constexpr
+     ; is_rust_function }
      [@warning "+missing-record-field-pattern"] ) =
   let default = default translation_unit proc_name in
   let pp_bool_default ~default title b f () =
@@ -357,6 +358,7 @@ let pp f
     F.fprintf f "; ret_annots= %a@," Annot.Item.pp ret_annots ;
   pp_bool_default ~default:default.is_ret_type_pod "is_ret_type_pod" is_ret_type_pod f () ;
   pp_bool_default ~default:default.is_ret_constexpr "is_ret_constexpr" is_ret_constexpr f () ;
+  pp_bool_default ~default:default.is_rust_function "is_rust_function" is_rust_function f () ;
   F.fprintf f "; proc_id= %a }@]" Procname.pp_unique_id proc_name
 
 

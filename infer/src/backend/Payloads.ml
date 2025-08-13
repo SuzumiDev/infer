@@ -18,6 +18,7 @@ type t =
   ; disjunctive_demo: DisjunctiveDemo.domain SafeLazy.t option
   ; static_constructor_stall_checker: StaticConstructorStallChecker.Summary.t SafeLazy.t option
   ; lab_resource_leaks: ResourceLeakDomain.summary SafeLazy.t option
+  ; crossmem_analysis: CrossMemDomain.summary SafeLazy.t option
   ; litho_required_props: LithoDomain.summary SafeLazy.t option
   ; pulse: PulseSummary.t SafeLazy.t option
   ; purity: PurityDomain.summary SafeLazy.t option
@@ -70,6 +71,7 @@ let all_fields =
     ~purity:(fun f -> mk f Purity PurityDomain.pp_summary)
     ~racerd:(fun f -> mk f RacerD RacerDDomain.pp_summary)
     ~lab_resource_leaks:(fun f -> mk f LabResourceLeaks ResourceLeakDomain.pp)
+    ~crossmem_analysis:(fun f -> mk f CrossMem CrossMemDomain.pp)
     ~scope_leakage:(fun f -> mk f ScopeLeakage ScopeLeakage.Summary.pp)
     ~siof:(fun f -> mk f SIOF SiofDomain.Summary.pp)
     ~lineage:(fun f -> mk f Lineage Lineage.Summary.pp)
@@ -110,6 +112,7 @@ let empty =
   ; disjunctive_demo= None
   ; static_constructor_stall_checker= None
   ; lab_resource_leaks= None
+  ; crossmem_analysis= None
   ; litho_required_props= None
   ; pulse= None
   ; purity= None
@@ -131,6 +134,7 @@ let freeze t =
        ; disjunctive_demo
        ; static_constructor_stall_checker
        ; lab_resource_leaks
+       ; crossmem_analysis
        ; litho_required_props
        ; pulse
        ; purity
@@ -152,6 +156,7 @@ let freeze t =
   freeze disjunctive_demo ;
   freeze static_constructor_stall_checker ;
   freeze lab_resource_leaks ;
+  freeze crossmem_analysis ;
   freeze litho_required_props ;
   freeze pulse ;
   freeze purity ;
@@ -257,7 +262,7 @@ module SQLite = struct
       ~static_constructor_stall_checker:data_of_sqlite_column
       ~litho_required_props:data_of_sqlite_column ~pulse:data_of_sqlite_column
       ~purity:data_of_sqlite_column ~racerd:data_of_sqlite_column
-      ~lab_resource_leaks:data_of_sqlite_column ~scope_leakage:data_of_sqlite_column
+      ~lab_resource_leaks:data_of_sqlite_column ~crossmem_analysis:data_of_sqlite_column ~scope_leakage:data_of_sqlite_column
       ~siof:data_of_sqlite_column ~lineage:data_of_sqlite_column
       ~lineage_shape:data_of_sqlite_column ~starvation:data_of_sqlite_column
 
@@ -306,6 +311,7 @@ module SQLite = struct
     ; disjunctive_demo= load ~proc_uid DisjunctiveDemo
     ; static_constructor_stall_checker= load ~proc_uid StaticConstructorStallChecker
     ; lab_resource_leaks= load ~proc_uid LabResourceLeaks
+    ; crossmem_analysis= load ~proc_uid CrossMem
     ; litho_required_props= load ~proc_uid LithoRequiredProps
     ; pulse= load ~proc_uid Pulse
     ; purity= load ~proc_uid Purity

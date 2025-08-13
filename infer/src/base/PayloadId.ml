@@ -16,6 +16,7 @@ type t =
   | DisjunctiveDemo
   | StaticConstructorStallChecker
   | LabResourceLeaks
+  | CrossMem
   | LithoRequiredProps
   | Pulse
   | Purity
@@ -47,6 +48,8 @@ let to_checker payload_id : Checker.t =
       StaticConstructorStallChecker
   | LabResourceLeaks ->
       ResourceLeakLabExercise
+  | CrossMem ->
+      CrossMemAnalysis
   | LithoRequiredProps ->
       LithoRequiredProps
   | Pulse ->

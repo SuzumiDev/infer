@@ -27,6 +27,7 @@ include sig
     ; disjunctive_demo: DisjunctiveDemo.domain SafeLazy.t option
     ; static_constructor_stall_checker: StaticConstructorStallChecker.Summary.t SafeLazy.t option
     ; lab_resource_leaks: ResourceLeakDomain.summary SafeLazy.t option
+    ; crossmem_analysis: CrossMemDomain.summary SafeLazy.t option
     ; litho_required_props: LithoDomain.summary SafeLazy.t option
     ; pulse: PulseSummary.t SafeLazy.t option
     ; purity: PurityDomain.summary SafeLazy.t option

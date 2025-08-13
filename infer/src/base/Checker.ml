@@ -31,6 +31,7 @@ type t =
   | PurityChecker
   | RacerD
   | ResourceLeakLabExercise
+  | CrossMemAnalysis
   | SILValidation
   | SIOF
   | ScopeLeakage
@@ -303,6 +304,15 @@ let config_unsafe checker =
       ; cli_flags= Some {deprecated= []; show_in_help= false}
       ; enabled_by_default= false
       ; activates= [] }
+  | CrossMemAnalysis ->
+      { id= "cross-mem-analysis"
+      ; kind= UserFacing {title= "Cross Mem Analysis"; markdown_body= ""}
+      ; support = mk_support_func ~clang:Support ()
+      ; short_documentation=""
+      ; cli_flags= Some {deprecated=[]; show_in_help=false}
+      ; enabled_by_default= true
+      ; activates= []
+      }
   | ScopeLeakage ->
       { id= "scope-leakage"
       ; kind= UserFacing {title= "Scope Leakage"; markdown_body= ""}
