@@ -1416,6 +1416,10 @@ and dump_textual =
     "Generate a SIL program from the captured target. A $(i,filename.sil) file is generated for \
      each $(i,filename.java) file in the target."
 
+and capture_rust =
+  CLOpt.mk_bool ~long:"capture-rust"
+    "Use this annotation if the SIL code was generated using Rust code"
+
 
 and dynamic_dispatch_json_file_path =
   CLOpt.mk_path_opt ~long:"dynamic-dispatch-json-file-path"
@@ -4065,6 +4069,8 @@ and dump_llair = !dump_llair
 and dump_llair_text = !dump_llair_text
 
 and dump_textual = !dump_textual
+
+and capture_rust = !capture_rust
 
 and dynamic_dispatch_json_file_path = !dynamic_dispatch_json_file_path
 

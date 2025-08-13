@@ -134,6 +134,7 @@ type t =
   ; has_added_return_param: bool  (** whether or not a return param was added *)
   ; is_ret_type_pod: bool  (** whether or not the return type is POD *)
   ; is_ret_constexpr: bool  (** whether the (C++) function or method is declared as [constexpr] *)
+  ; is_rust_function: bool (** whether the function is defined in Rust *)
   }
 
 let get_access attributes = attributes.access
@@ -216,7 +217,8 @@ let default translation_unit proc_name =
   ; ret_type= StdTyp.void
   ; ret_annots= Annot.Item.empty
   ; is_ret_type_pod= true
-  ; is_ret_constexpr= false }
+  ; is_ret_constexpr= false
+  ; is_rust_function= Config.capture_rust }
 
 
 let pp_parameters =

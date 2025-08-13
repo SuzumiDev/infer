@@ -932,3 +932,5 @@ val clang_compilation_dbs : [`Escaped of string | `Raw of string] list
 
 val set_gc_params : unit -> unit
 (** set GC paramemters according to command line arguments and defaults *)
+
+val capture_rust : bool

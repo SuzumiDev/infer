@@ -90,6 +90,7 @@ type t =
   ; has_added_return_param: bool  (** whether or not a return param was added *)
   ; is_ret_type_pod: bool  (** whether or not the return type is POD *)
   ; is_ret_constexpr: bool  (** whether the (C++) function or method is declared as [constexpr] *)
+  ; is_rust_function: bool
   }
 
 val default : SourceFile.t -> Procname.t -> t
