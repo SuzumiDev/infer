@@ -37,6 +37,7 @@ let load, clear_cache, store, set_lru_limit =
   let load_from_uid uid =
     let result = find uid in
     Option.iter result ~f:(fun attrs -> Cache.add cache (ProcAttributes.get_proc_name attrs) attrs) ;
+    Logging.debug_dev "WEGETPASTTHIS";
     result
   in
   let load pname =
@@ -45,6 +46,7 @@ let load, clear_cache, store, set_lru_limit =
     | Some _ as result ->
         result
     | None -> (
+      Logging.debug_dev "LOADINGFFROMUID %s" (Procname.to_unique_id pname) ;
       match load_from_uid (Procname.to_unique_id pname) with
       | None ->
           MissingDependencies.record_procname pname ;

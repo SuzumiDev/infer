@@ -44,7 +44,7 @@ type mode =
 let is_analyze_mode = function Analyze -> true | _ -> false
 
 let is_compatible_with_textual_generation = function
-  | Javac _ | Llair _ | Python _ | PythonBytecode _ | LLVMBitcode _ | Rust _ | Swiftc _ ->
+  | Javac _ | Llair _ | Python _ | PythonBytecode _ | LLVMBitcode _ | Rust _ | Swiftc _ | Clang _ ->
       true
   | _ ->
       false

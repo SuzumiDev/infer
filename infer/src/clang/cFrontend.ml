@@ -80,6 +80,9 @@ let do_source_file (translation_unit_context : CFrontend_config.translation_unit
       () ) ;
   L.(debug Capture Verbose) "@\n End building call/cfg graph for '%a'.@\n" SourceFile.pp source_file ;
   SourceFiles.add source_file cfg (Tenv.FileLocal tenv) (Some integer_type_widths) ;
+  ( if Config.dump_textual then
+      let filename = Filename.chop_extension (SourceFile.to_abs_path source_file) ^ ".sil" in
+      TextualSil.from_c ~filename tenv cfg ) ;
   if Config.debug_mode then Tenv.store_debug_file_for_source source_file tenv ;
   if
     Config.debug_mode || Config.testing_mode || Config.frontend_tests

@@ -47,6 +47,7 @@ let proc_names_of_source =
         MissingDependencies.record_sourcefile source ;
         []
     | Some procs ->
+        (* PRINTTODO List.iter procs ~f:(fun p -> match p with | Procname.C c -> L.debug_dev "nameae %s" (List.hd_exn  (QualifiedCppName.to_rev_list c.c_name))) ;*)
         procs
 
 

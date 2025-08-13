@@ -136,8 +136,14 @@ let detect_mutual_recursion_cycle ~caller_summary ~callee specialization =
 
 
 let procedure_is_defined proc_name =
-  Attributes.load proc_name
-  |> Option.exists ~f:(fun proc_attributes -> proc_attributes.ProcAttributes.is_defined)
+  let att = Attributes.load proc_name in
+  L.debug_dev "checking proc %a@ \n" Procname.pp proc_name ;
+  let _ = match att with
+  | Some a -> L.debug_dev "this proc is defined %b \n" a.is_defined ;
+  
+  | None -> L.debug_dev "this proc does not exist" ;
+  in
+  att |> Option.exists ~f:(fun proc_attributes -> proc_attributes.ProcAttributes.is_defined)
 
 
 (* Remember what the last status sent was so that we can update the status correctly when entering
@@ -446,6 +452,8 @@ let number_of_recursion_restarts = DLS.new_key (fun () -> 0)
 let rec analyze_callee_can_raise_recursion ~lazy_payloads (analysis_req : AnalysisRequest.t)
     ~specialization ?caller_summary ?(from_file_analysis = false) callee_pname : _ AnalysisResult.t
     =
+  
+  (* okay so here we do actually get test() called *)
   match detect_mutual_recursion_cycle ~caller_summary ~callee:callee_pname specialization with
   | `InMutualRecursionCycle ->
       let target = {SpecializedProcname.proc_name= callee_pname; specialization} in
@@ -489,9 +497,11 @@ let rec analyze_callee_can_raise_recursion ~lazy_payloads (analysis_req : Analys
         L.progress "@\nClosed the cycle finishing in recursive call to %a" Procname.pp callee_pname ;
       Error MutualRecursionCycle
   | `NotInMutualRecursionCycle -> (
+      (* test() does go through here *)
       register_callee ~cycle_detected:false ?caller_summary callee_pname ;
       if is_in_block_list callee_pname then Error InBlockList
       else
+        (* test() goes through here *)
         let analyze_callee_aux specialization_context =
           error_if_ondemand_analysis_during_replay ~from_file_analysis caller_summary callee_pname ;
           RestartScheduler.with_lock ~get_actives:ActiveProcedures.get_all callee_pname
@@ -539,18 +549,24 @@ let rec analyze_callee_can_raise_recursion ~lazy_payloads (analysis_req : Analys
           is_summary_already_computed ~lazy_payloads analysis_req callee_pname specialization
         with
         | `SummaryReady summary ->
+            L.debug_dev "SUMMARYREADY %a@\n" Procname.pp callee_pname ;
             Ok summary
         | `ComputeDefaultSummary ->
+          L.debug_dev "COMPUTEDEFAULTSUMMARY %a@\n" Procname.pp callee_pname ;
             analyze_callee_aux None |> AnalysisResult.of_option
         | `ComputeDefaultSummaryThenSpecialize specialization ->
+          L.debug_dev "THENSPECIALIZE %a@\n" Procname.pp callee_pname ;
             (* recursive call so that we detect mutual recursion on the unspecialized summary *)
             analyze_callee ~lazy_payloads analysis_req ~specialization:None ?caller_summary
               ~from_file_analysis callee_pname
             |> Result.bind ~f:(fun summary ->
                    analyze_callee_aux (Some (summary, specialization)) |> AnalysisResult.of_option )
         | `AddNewSpecialization (summary, specialization) ->
+          L.debug_dev "NEWSPEC %a@\n" Procname.pp callee_pname ;
             analyze_callee_aux (Some (summary, specialization)) |> AnalysisResult.of_option
         | `UnknownProcedure ->
+          (* test() returns as unknown proc *)
+          L.debug_dev "UNKNOWNPROC %a@\n" Procname.pp callee_pname ;
             Error UnknownProcedure )
 
 
@@ -614,6 +630,7 @@ let analyze_proc_name_for_file_analysis analysis_req callee_pname =
 
 let analyze_file_procedures analysis_req procs_to_analyze source_file_opt =
   let saved_language = Language.get_language () in
+  (*List.iter procs_to_analyze ~f:(fun p -> match p with | Procname.C c -> L.debug_dev "PROCSTOANALYZE %s\n" (List.hd_exn  (QualifiedCppName.to_rev_list c.c_name))) ; *)
   let analyze_proc_name_call pname =
     ignore (analyze_proc_name_for_file_analysis analysis_req pname : Summary.t AnalysisResult.t)
   in

@@ -928,6 +928,7 @@ let load_uid_ =
   let load_statement_adb = load_statement AnalysisDatabase in
   let load_statement_cdb = load_statement CaptureDatabase in
   fun ?(capture_only = false) proc_uid ->
+    L.debug_dev "TESTINGLOADUID %s \n" proc_uid ;
     let run_query stmt =
       Database.with_registered_statement stmt ~f:(fun db stmt ->
           Sqlite3.bind stmt 1 (Sqlite3.Data.TEXT proc_uid)
@@ -945,6 +946,7 @@ let load_uid_ =
 
 
 let load proc_name =
+  L.debug_dev "TESTINGLOADFROMPROCNAME %s \n" (Procname.to_unique_id proc_name) ;
   match load_uid_ (Procname.to_unique_id proc_name) with
   | Some proc_desc_opt ->
       proc_desc_opt

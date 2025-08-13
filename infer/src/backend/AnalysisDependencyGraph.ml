@@ -247,6 +247,10 @@ module Serialized = struct
     let edges_to_ignore = ref Procname.Map.empty in
     IntMap.iter
       (fun id pre_node ->
+        L.debug_dev "PROCDESCLOADUID %s \n" pre_node.proc_uid ;
+        L.debug_dev "WITH DEPS " ;
+        let _ = List.iter pre_node.deps (fun i -> L.debug_dev "%s" (string_of_int i)) in
+        L.debug_dev "\n" ;
         match Procdesc.load_uid pre_node.proc_uid with
         | None ->
             (* we don't need to bother with procedures that don't have a CFG *)

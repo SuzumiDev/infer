@@ -406,6 +406,31 @@ module ProcDeclBridge = struct
         let result_type = Procname.Java.get_return_typ jpname |> TypBridge.annotated_of_sil in
         (* FIXME when adding inheritance *)
         {qualified_name; formals_types= Some formals_types; result_type; attributes}
+    | C cpname ->
+        let rec_name = Option.value (List.hd (QualifiedCppName.to_rev_list cpname.c_name)) ~default:"ERROR" in
+        let name : ProcName.t = ProcName.of_string ~loc:Textual.Location.Unknown rec_name in
+        let enclosing_class = QualifiedProcName.TopLevel in
+        let qualified_name : QualifiedProcName.t = {enclosing_class; name} in
+        let attributes = [] in
+        let formals_types = match cpname.c_template_args with
+        | NoTemplate -> []
+        | Template t -> t.args |> List.map ~f:(fun arg ->
+            match arg with
+            | SilTyp.TType t -> TypBridge.annotated_of_sil t
+            | SilTyp.TInt t -> Typ.mk_without_attributes Typ.Int
+            | SilTyp.TNull -> Typ.mk_without_attributes Typ.Null
+            | SilTyp.TNullPtr -> Typ.mk_without_attributes (Typ.Ptr Typ.Null)
+            | _ -> L.die InternalError "SIL TYPE NOT SUPPORTED IN C MODE TEXTUAL"
+            (* FIXME when figure out how opaque works in SIL*)
+        )
+        in
+        (* okay so we have something that can be TType of t which is the same as SylTyp.t *)
+        (* this means we can take TypBridge.annotated_of_sil to get it to formals_typs*)
+        (* take Typ.t, use annotated and Typ.mk_without_attributes *)
+
+        (* FIXME when figure out what result type is (idk where tf that is stored)*)
+        let result_type = Typ.mk_without_attributes Typ.Int in
+        {qualified_name; formals_types= Some formals_types; result_type; attributes}
     | _ ->
         L.die InternalError "Non-Java procname %a should not appear in Java mode" Procname.describe
           pname
@@ -671,7 +696,8 @@ module ExpBridge = struct
     | Lindex (e1, e2) ->
         Index (of_sil decls tenv e1, of_sil decls tenv e2)
     | Sizeof _ ->
-        L.die InternalError "Sizeof expression should note appear here, please report"
+      Const (Const.Int (Z.of_int 32)) (* FIXME when sizeof actually works *)
+        (* L.die InternalError "Sizeof expression should note appear here, please report" *)
 
 
   let to_sil lang decls_env procname exp =
@@ -1143,8 +1169,13 @@ module NodeBridge = struct
     let rec backward_iter i acc =
       if i < 0 then acc
       else
-        let instr = InstrBridge.of_sil decls tenv instrs.(i) in
-        backward_iter (i - 1) (instr :: acc)
+        (* FIXME when metadata is supported *)
+        let instr = instrs.(i) in
+        match instr with
+        | Metadata _ -> backward_iter (i - 1) acc
+        | _          ->  let instr = InstrBridge.of_sil decls tenv instrs.(i) in
+                         backward_iter (i - 1) (instr :: acc)
+        
     in
     let instrs_length = Array.length instrs in
     let instrs =
@@ -1310,7 +1341,11 @@ module ProcDescBridge = struct
     let node_of_sil = make_label_of_node () |> NodeBridge.of_sil decls tenv in
     let start_node = P.get_start_node pdesc |> node_of_sil in
     let nodes = List.map (P.get_nodes pdesc) ~f:node_of_sil in
+    Logging.debug_dev "checking start node %s" start_node.label.value ;
+    Logging.debug_dev "len of nodes %s" (string_of_int (List.length nodes)) ;
+    let na = List.map ~f:(fun (n: Node.t) -> Logging.debug_dev "checking other node %s" n.label.value ; n) nodes in
     let nodes = List.rev nodes in
+    let nodes = [start_node] in
     let nodes =
       match nodes with
       | head :: _ when Node.equal head start_node ->
@@ -1433,6 +1468,16 @@ let from_java ~filename tenv cfg =
       pp_copyright fmt ;
       Module.pp fmt (ModuleBridge.of_sil ~sourcefile ~lang:Java tenv cfg) ;
       Format.pp_print_flush fmt () )
+
+let from_c ~filename tenv cfg =
+  Utils.with_file_out filename ~f:(fun oc ->
+      let fmt = F.formatter_of_out_channel oc in
+      let sourcefile = SourceFile.create filename in
+      pp_copyright fmt ;
+      Module.pp fmt (ModuleBridge.of_sil ~sourcefile ~lang:C tenv cfg) ;
+      Logging.debug_dev "testing" ;
+      Format.pp_print_flush fmt ()
+    )
 
 
 let dump_module ~show_location ~filename module_ =
