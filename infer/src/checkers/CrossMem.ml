@@ -8,14 +8,29 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
 
   type analysis_data = CrossMemDomain.summary InterproceduralAnalysis.t
 
+  let find_arg_index formals ident =
+      let arg_names = formals |> List.map ~f:(fun (name, _, _) -> Mangled.to_string name) in
+      let rec find_idx lst idx =
+        match lst with
+        | [] -> None
+        | x :: xs -> if String.equal x ident then Some idx else find_idx xs (idx + 1)
+      in
+      find_idx arg_names 0
+
+  let this_freetype is_rust_function : CrossMemDomain.allocType  = if is_rust_function then FreeRust else FreeC
+
+  let malloc_compatible is_rust_function (alloctype : CrossMemDomain.allocType) = this_freetype is_rust_function == alloctype
+
+  let ref_to_norefstring (exp : Exp.t) = let str = Exp.to_string exp in if Char.equal str.[0] '&' then String.sub str ~pos:1 ~len:(String.length str - 1) else str
+
   let exec_instr (astate : CrossMemDomain.t)
-    {InterproceduralAnalysis.proc_desc; tenv; analyze_dependency=_; _} _ _
+    {InterproceduralAnalysis.proc_desc; tenv; analyze_dependency; _} _ _
     (instr : Sil.instr) = 
     let proc_att = Procdesc.get_attributes proc_desc in
       (*L.debug_dev "is rust func %b\n" proc_att.is_rust_function ; *)
       L.debug_dev "len astate %i\n" (CrossMemDomain.len astate) ;
     match instr with
-    | Call ((returnIdent, _returnTyp), Const (Cfun _callee_proc_name), _actuals, _loc, _) ->
+    | Call ((returnIdent, _returnTyp), Const (Cfun _callee_proc_name), actuals, _loc, _) ->
         (* function call of the form [_return = _callee_proc_name(..._actuals)] *)
         (* Call function with return identification returnIdent and prob actuals as arg*)
         (* calling malloc here then makes the pointer *)
@@ -25,18 +40,38 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
         let cname = match _callee_proc_name with
           | Procname.C c -> QualifiedCppName.to_qual_string c.c_name
           | _ -> L.die InternalError "not a C function" in
-        let astate2 = match cname with (* I know this looks ugly but ocaml didn't let me do it any other way for some reason*)
-          | "malloc" -> CrossMemDomain.add astate cname (Ident.to_string returnIdent)
-          | "free"    -> astate
-          | _        -> astate
-        in
+        (match cname with
+          | "malloc" -> 
+            let returnIdentStr = Ident.to_string returnIdent in
+            (if CrossMemDomain.mem astate returnIdentStr
+              then
+                (if malloc_compatible proc_att.is_rust_function (CrossMemDomain.find astate returnIdentStr)
+                  then CrossMemDomain.remove astate returnIdentStr
+                  else let _ = L.debug_dev "found error" in astate) (* todo: report error *)
+              else astate)
+          | "free"    -> 
+            let args, _argtypes = List.unzip actuals in
+              (match List.nth args 0 with
+            | Some arg -> 
+                L.debug_dev "adding free for %a" Exp.pp arg ;
+                CrossMemDomain.add astate (Exp.to_string arg) (this_freetype proc_att.is_rust_function)
+            | None -> astate)
+            
+          | _ -> astate)
+        
 
-        astate2
+        (*steps: first add all on free and remove on malloc*)
+        (* if the alias is in argument names then change it to number of argument *)
+        (* this summary is lifted to the upper function *)
+        (* in upper function, change from number of argument to alias *)
+        (* repeat until alias is malloced by a different language *)
+
     | Load {id= _lhs; e= _rhs; typ= _lhs_typ; loc= _loc} ->
         (* load of an address [_lhs:_lhs_typ = *_rhs] *)
         (* load into lhs what is in address rhs (&i)*)
         (* if &i is in the map then add as same language *)
         L.debug_dev "Load ident %a rhs %a\n" Ident.pp _lhs Exp.pp _rhs ;
+        
         astate
     | Store {e1= _lhs; e2= _rhs; typ= _rhs_typ; loc= _loc} ->
         L.debug_dev "Store lhs %a rhs %a\n" Exp.pp _lhs Exp.pp _rhs;
@@ -61,7 +96,7 @@ module TransferFunctions (CFG : ProcCfg.S) = struct
 
 end
 
-module CFG = ProcCfg.Normal
+module CFG = ProcCfg.Backward (ProcCfg.Normal)
 module Analyzer = AbstractInterpreter.MakeRPO (TransferFunctions (CFG))
 
 
