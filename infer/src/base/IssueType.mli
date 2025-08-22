@@ -203,6 +203,8 @@ val ipc_on_ui_thread : t
 
 val lab_resource_leak : t
 
+val cross_mem_free : t
+
 val lockless_violation : t
 
 val lock_consistency_violation : t

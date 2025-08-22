@@ -648,6 +648,9 @@ let lab_resource_leak =
   register ~category:NoCategory ~id:"LAB_RESOURCE_LEAK" Error ResourceLeakLabExercise
     ~user_documentation:"Toy issue."
 
+let cross_mem_free =
+  register ~category:MemoryError ~id:"CROSS_MEM_FREE" Error CrossMemAnalysis
+    ~user_documentation:"Memory allocated in one language freed in another"
 
 let lock_consistency_violation =
   register Warning ~id:"LOCK_CONSISTENCY_VIOLATION" ~category:Concurrency RacerD
