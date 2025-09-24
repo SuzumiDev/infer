@@ -37,9 +37,9 @@ let trim_actuals_if_var_arg proc_name_opt ~formals ~actuals =
   else actuals
 
 
-let is_const_version pname_method other_method =
-  String.equal pname_method (Procname.get_method other_method)
-  && Option.exists (IRAttributes.load other_method) ~f:(fun attr ->
+let is_const_version pname_method (other_method : Struct.tenv_method) =
+  String.equal pname_method (Procname.get_method other_method.name)
+  && Option.exists (IRAttributes.load other_method.name) ~f:(fun attr ->
          attr.ProcAttributes.is_cpp_const_member_fun )
 
 
@@ -359,6 +359,7 @@ let apply_callee ({InterproceduralAnalysis.tenv; proc_desc} as analysis_data)
          ready to be accessed by the exception handler. *)
       map_call_result astate ~f:(fun return_val_opt _subst astate ->
           Sat (copy_to_caller_return_variable astate return_val_opt) )
+  | InfiniteLoop astate
   | AbortProgram astate
   | ExitProgram astate
   | LatentAbortProgram {astate}
@@ -376,7 +377,7 @@ let apply_callee ({InterproceduralAnalysis.tenv; proc_desc} as analysis_data)
           match callee_exec_state with
           | ContinueProgram _ | ExceptionRaised _ ->
               assert false
-          | AbortProgram _ ->
+          | AbortProgram _ | InfiniteLoop _ ->
               (* bypass the current errors to avoid compounding issues *)
               Sat (Ok (AbortProgram astate_summary))
           | ExitProgram _ ->
@@ -651,6 +652,8 @@ let add_need_dynamic_type_specialization needs execution_states =
             ExceptionRaised (update_astate astate)
         | ContinueProgram astate ->
             ContinueProgram (update_astate astate)
+        | InfiniteLoop astate ->
+            InfiniteLoop (update_astate astate)
         | ExitProgram summary ->
             ExitProgram (update_summary summary)
         | AbortProgram summary ->
@@ -763,7 +766,8 @@ let check_uninit_method ({InterproceduralAnalysis.tenv} as analysis_data) call_l
         true
     | Some {Struct.methods} ->
         let callee_name = Procname.get_method callee_pname in
-        List.exists methods ~f:(fun method_name ->
+        List.exists methods ~f:(fun (tenv_method : Struct.tenv_method) ->
+            let method_name = tenv_method.name in
             String.equal callee_name (Procname.get_method method_name) )
   in
   let skip_special_pname pname =

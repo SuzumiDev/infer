@@ -4,7 +4,6 @@
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  *)
-
 open! IStd
 module F = Format
 module L = Logging
@@ -13,6 +12,7 @@ open PulseBasicInterface
 open PulseDomainInterface
 open PulseOperationResult.Import
 module CallGlobalForStats = PulseCallOperations.GlobalForStats
+module Metadata = AbstractInterpreter.DisjunctiveMetadata
 
 (** raised when we detect that pulse is using too much memory to stop the analysis of the current
     procedure *)
@@ -63,7 +63,8 @@ let is_not_implicit_or_copy_ctor_assignment pname =
          || attrs.ProcAttributes.is_cpp_copy_assignment ) )
 
 
-let is_non_deleted_copy pname =
+let is_non_deleted_copy (tenv_method : Struct.tenv_method) =
+  let pname = tenv_method.name in
   (* TODO: Default is set to true for now because we can't get the attributes of library calls right now. *)
   Option.value_map ~default:true (IRAttributes.load pname) ~f:(fun attrs ->
       attrs.ProcAttributes.is_cpp_copy_ctor && not attrs.ProcAttributes.is_cpp_deleted )
@@ -183,6 +184,28 @@ module PulseTransferFunctions = struct
 
   type analysis_data = PulseSummary.t InterproceduralAnalysis.t
 
+  let widen_list (prev : DisjDomain.t list) (next : DisjDomain.t list) : DisjDomain.t list =
+    let plist = List.rev_map ~f:fst prev in
+    let nlist = List.rev_map ~f:fst next in
+    match ExecutionDomain.back_edge plist nlist with
+    | None ->
+        prev
+    | Some cnt ->
+        let exec, path = List.nth_exn next cnt in
+        let exec =
+          match exec with
+          | ContinueProgram astate ->
+              let cfgnode = AnalysisState.get_node () |> Option.value_exn in
+              Metadata.record_alert_node cfgnode ;
+              InfiniteLoop astate
+          | _ ->
+              exec
+        in
+        prev @ [(exec, path)]
+
+
+  (* END OF BACK-EDGE CODE *)
+
   let get_pvar_formals pname =
     IRAttributes.load pname |> Option.map ~f:ProcAttributes.get_pvar_formals
 
@@ -263,7 +286,8 @@ module PulseTransferFunctions = struct
     | ExitProgram _
     | LatentAbortProgram _
     | LatentInvalidAccess _
-    | LatentSpecializedTypeIssue _ ->
+    | LatentSpecializedTypeIssue _
+    | InfiniteLoop _ ->
         Sat (Ok exec_state)
 
 
@@ -290,6 +314,7 @@ module PulseTransferFunctions = struct
       | LatentAbortProgram _
       | ExitProgram _
       | ExceptionRaised _
+      | InfiniteLoop _
       | LatentInvalidAccess _
       | LatentSpecializedTypeIssue _ ->
           exec_state
@@ -973,7 +998,8 @@ module PulseTransferFunctions = struct
             L.d_printfln "clearing builder attributes on exception" ;
             let astate = AbductiveDomain.finalize_all_hack_builders astate in
             Ok (ExceptionRaised astate)
-        | ( ExitProgram _
+        | ( InfiniteLoop _
+          | ExitProgram _
           | AbortProgram _
           | LatentAbortProgram _
           | LatentInvalidAccess _
@@ -1088,6 +1114,7 @@ module PulseTransferFunctions = struct
               match astate with
               | AbortProgram _
               | ExceptionRaised _
+              | InfiniteLoop _
               | ExitProgram _
               | LatentAbortProgram _
               | LatentInvalidAccess _
@@ -1142,6 +1169,7 @@ module PulseTransferFunctions = struct
           match astate with
           | AbortProgram _
           | ExceptionRaised _
+          | InfiniteLoop _
           | ExitProgram _
           | LatentAbortProgram _
           | LatentInvalidAccess _
@@ -1175,7 +1203,8 @@ module PulseTransferFunctions = struct
         | ExitProgram _
         | LatentAbortProgram _
         | LatentInvalidAccess _
-        | LatentSpecializedTypeIssue _ ->
+        | LatentSpecializedTypeIssue _
+        | InfiniteLoop _ ->
             Some exec_state
         | ContinueProgram astate -> (
           match PulseOperations.remove_vars vars location astate with
@@ -1326,14 +1355,18 @@ module PulseTransferFunctions = struct
       (astate_n : NonDisjDomain.t) ({InterproceduralAnalysis.tenv; proc_desc} as analysis_data)
       cfg_node (instr : Sil.instr) : ExecutionDomain.t list * PathContext.t * NonDisjDomain.t =
     match astate with
-    | AbortProgram _ | LatentAbortProgram _ | LatentInvalidAccess _ | LatentSpecializedTypeIssue _
-      ->
+    | AbortProgram _
+    | LatentAbortProgram _
+    | LatentInvalidAccess _
+    | InfiniteLoop _
+    | LatentSpecializedTypeIssue _ ->
         ([astate], path, astate_n)
     (* an exception has been raised, we skip the other instructions until we enter in
        exception edge *)
     | ExceptionRaised _
     (* program already exited, simply propagate the exited state upwards  *)
     | ExitProgram _ ->
+        (* L.debug Analysis Quiet "exec_instr: ExceptionRaised/ExitProgram \n"; *)
         ([astate], path, astate_n)
     | ContinueProgram astate -> (
       match instr with
@@ -1741,6 +1774,7 @@ let exit_function limit analysis_data location posts non_disj_astate =
         | AbortProgram _
         | ExitProgram _
         | ExceptionRaised _
+        | InfiniteLoop _
         | LatentAbortProgram _
         | LatentInvalidAccess _
         | LatentSpecializedTypeIssue _ ->
@@ -1790,7 +1824,7 @@ let log_number_of_unreachable_nodes proc_desc invariant_map =
   let proc_name = Procdesc.get_proc_name proc_desc in
   let add, mem =
     let open Procdesc in
-    let set = NodeHashSet.create 17 in
+    let set = NodeHashSet.create 32 in
     let add node = NodeHashSet.add node set in
     let mem node = NodeHashSet.mem set node in
     (add, mem)

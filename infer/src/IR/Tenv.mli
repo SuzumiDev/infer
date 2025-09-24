@@ -51,7 +51,7 @@ val mk_struct :
   -> ?default:Struct.t
   -> ?fields:Struct.field list
   -> ?statics:Struct.field list
-  -> ?methods:Procname.t list
+  -> ?methods:Struct.tenv_method list
   -> ?exported_objc_methods:Procname.t list
   -> ?supers:Typ.Name.t list
   -> ?objc_protocols:Typ.Name.t list
@@ -152,6 +152,8 @@ val resolve_method :
     information about the unresolved reasons which are for suppressing FP issues.
     [method_exists adapted_procname methods] should check if [adapted_procname] ([procname] but with
     its class potentially changed to some [other_class]) is among the [methods] of [other_class]. *)
+
+val resolve_method_with_offset : t -> Typ.name -> int -> Procname.t option
 
 val resolve_field_info : t -> Typ.Name.t -> Fieldname.t -> Struct.field_info option
 (** [resolve_field_info tenv class_name field] tries to find the first field declaration that

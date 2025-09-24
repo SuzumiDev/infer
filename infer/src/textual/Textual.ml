@@ -117,6 +117,8 @@ module type NAME = sig
 
   val of_string : ?loc:Location.t -> string -> t
 
+  val to_string : t -> string
+
   val pp : F.formatter -> t -> unit
 
   val is_hack_init : t -> bool
@@ -145,6 +147,8 @@ module Name : NAME = struct
     {value= replace_dot_with_2colons str; loc}
 
 
+  let to_string {value} = value
+
   let pp fmt name = F.pp_print_string fmt name.value
 
   let is_hack_init {value} = String.equal value "_86pinit" || String.equal value "_86constinit"
@@ -164,6 +168,8 @@ let builtin_allocate = "__sil_allocate"
 let builtin_malloc = "__sil_malloc"
 
 let builtin_free = "__sil_free"
+
+let builtin_swift_alloc = "__sil_swift_alloc"
 
 let builtin_assert_fail = "__sil_assert_fail"
 
@@ -193,6 +199,8 @@ module BaseTypeName : sig
   val wildcard : t
 
   val swift_tuple_class_name : t
+
+  val is_hack_closure_generated_type : t -> bool
 end = struct
   include Name
 
@@ -207,6 +215,8 @@ end = struct
   let hack_generics = {value= "HackGenerics"; loc= Location.Unknown}
 
   let swift_tuple_class_name = {value= "__infer_tuple_class"; loc= Location.Unknown}
+
+  let is_hack_closure_generated_type {value} = String.is_prefix ~prefix:"Closure$" value
 end
 
 module TypeName : sig
@@ -237,6 +247,8 @@ module TypeName : sig
   val wildcard : t
 
   val mk_swift_tuple_type_name : t list -> t
+
+  val is_hack_closure_generated_type : t -> bool
 end = struct
   module T = struct
     type t = {name: BaseTypeName.t; args: t list} [@@deriving compare, equal, hash]
@@ -273,13 +285,20 @@ end = struct
   let llvm_builtin = from_basename BaseTypeName.llvm_builtin
 
   let hack_generics = from_basename BaseTypeName.hack_generics
+
+  let is_hack_closure_generated_type {name} = BaseTypeName.is_hack_closure_generated_type name
 end
 
 module QualifiedProcName = struct
   type enclosing_class = TopLevel | Enclosing of TypeName.t [@@deriving equal, hash, compare]
 
-  type t = {enclosing_class: enclosing_class; name: ProcName.t} [@@deriving compare, equal, hash]
-  (* procedure name [name] is attached to the name space [enclosing_class] *)
+  module T = struct
+    type t = {enclosing_class: enclosing_class; name: ProcName.t} [@@deriving compare, equal, hash]
+    (* procedure name [name] is attached to the name space [enclosing_class] *)
+  end
+
+  include T
+  module Map = Stdlib.Map.Make (T)
 
   let pp_enclosing_class fmt = function
     | TopLevel ->
@@ -323,7 +342,19 @@ module QualifiedProcName = struct
 
   let name {name} = name
 
+  let get_class_name name =
+    match name with {enclosing_class= Enclosing class_name} -> Some class_name | _ -> None
+
+
   let is_hack_init {name} = ProcName.is_hack_init name
+
+  let is_hack_closure_generated_invoke {enclosing_class; name} =
+    match enclosing_class with
+    | Enclosing class_name when TypeName.is_hack_closure_generated_type class_name ->
+        String.equal name.value "__invoke"
+    | _ ->
+        false
+
 
   module Hashtbl = Hashtbl.Make (struct
     type nonrec t = t [@@deriving equal, hash]
@@ -410,9 +441,19 @@ module Attr = struct
 
   let mk_plain_name name = {name= "plain_name"; values= [name]; loc= Location.Unknown}
 
+  let mk_method_offset offset =
+    {name= "method_offset"; values= [Int.to_string offset]; loc= Location.Unknown}
+
+
   let get_plain_name attr =
     if String.equal attr.name "plain_name" then
       match attr.values with [name] -> Some name | _ -> None
+    else None
+
+
+  let get_method_offset attr =
+    if String.equal attr.name "method_offset" then
+      match attr.values with [offset] -> Int.of_string_opt offset | _ -> None
     else None
 
 
@@ -619,13 +660,17 @@ module ProcDecl = struct
 
   let malloc_name = make_toplevel_name builtin_malloc Location.Unknown
 
+  let swift_alloc_name = make_toplevel_name builtin_swift_alloc Location.Unknown
+
   let free_name = make_toplevel_name builtin_free Location.Unknown
 
   let assert_fail_name = make_toplevel_name builtin_assert_fail Location.Unknown
 
   let allocate_array_name = make_toplevel_name builtin_allocate_array Location.Unknown
 
-  let lazy_class_initialize_name = make_toplevel_name builtin_lazy_class_initialize Location.Unknown
+  let lazy_class_initialize_builtin =
+    make_toplevel_name builtin_lazy_class_initialize Location.Unknown
+
 
   let get_lazy_class_name = make_toplevel_name builtin_get_lazy_class Location.Unknown
 
@@ -744,6 +789,10 @@ module ProcDecl = struct
 
   let is_free_builtin qualified_name = QualifiedProcName.equal free_name qualified_name
 
+  let is_swift_alloc_builtin qualified_name =
+    QualifiedProcName.equal swift_alloc_name qualified_name
+
+
   let is_assert_fail_builtin qualified_name =
     QualifiedProcName.equal assert_fail_name qualified_name
 
@@ -753,7 +802,7 @@ module ProcDecl = struct
 
 
   let is_lazy_class_initialize_builtin qualified_name =
-    QualifiedProcName.equal lazy_class_initialize_name qualified_name
+    QualifiedProcName.equal lazy_class_initialize_builtin qualified_name
 
 
   let is_get_lazy_class_builtin qualified_name =
@@ -820,7 +869,7 @@ module ProcDecl = struct
     builtins @ unop_builtins @ binop_builtins
 
 
-  let builtins_swift = [builtin_assert_fail]
+  let builtins_swift = [builtin_assert_fail; builtin_swift_alloc]
 
   let is_builtin (proc : QualifiedProcName.t) lang =
     match lang with
@@ -859,7 +908,46 @@ module Struct = struct
         pp_fields fields
 end
 
-module Exp = struct
+module rec Exp : sig
+  type call_kind = Virtual | NonVirtual [@@deriving equal]
+
+  type t =
+    | Var of Ident.t  (** pure variable: it is not an lvalue *)
+    | Load of {exp: t; typ: Typ.t option}
+    | Lvar of VarName.t  (** the address of a program variable *)
+    | Field of {exp: t; field: qualified_fieldname}  (** field offset *)
+    | Index of t * t  (** an array index offset: [exp1[exp2]] *)
+    | Const of Const.t
+    | If of {cond: BoolExp.t; then_: t; else_: t}
+    | Call of {proc: QualifiedProcName.t; args: t list; kind: call_kind}
+    | Closure of
+        { proc: QualifiedProcName.t
+        ; captured: t list
+        ; params: VarName.t list
+        ; attributes: Attr.t list }
+    | Apply of {closure: t; args: t list}
+    | Typ of Typ.t
+
+  val call_non_virtual : QualifiedProcName.t -> t list -> t
+
+  val call_virtual : QualifiedProcName.t -> t -> t list -> t
+
+  val call_sig : QualifiedProcName.t -> int -> Lang.t -> ProcSig.t
+
+  val contain_regular_call : t -> bool
+
+  val allocate_object : TypeName.t -> t
+
+  val not : t -> t
+
+  val cast : Typ.t -> t -> t
+
+  val vars : t -> Ident.Set.t
+
+  val is_zero_exp : t -> bool
+
+  val pp : F.formatter -> t -> unit
+end = struct
   (* TODO(T133190934) *)
   type call_kind = Virtual | NonVirtual [@@deriving equal]
 
@@ -871,6 +959,7 @@ module Exp = struct
     | Index of t * t
     (*  | Sizeof of sizeof_data *)
     | Const of Const.t
+    | If of {cond: BoolExp.t; then_: t; else_: t}
     | Call of {proc: QualifiedProcName.t; args: t list; kind: call_kind}
     | Closure of
         { proc: QualifiedProcName.t
@@ -922,6 +1011,8 @@ module Exp = struct
         F.fprintf fmt "%a[%a]" pp e1 pp e2
     | Const c ->
         Const.pp fmt c
+    | If {cond; then_; else_} ->
+        F.fprintf fmt "(if %a then %a else %a)" BoolExp.pp cond pp then_ pp else_
     | Call {proc; args; kind} -> (
       match kind with
       | Virtual -> (
@@ -945,20 +1036,23 @@ module Exp = struct
 
   and pp_list fmt l = F.fprintf fmt "(%a)" (pp_list_with_comma pp) l
 
-  let rec do_not_contain_regular_call exp =
+  let rec contain_regular_call exp =
     match exp with
     | Var _ | Lvar _ | Const _ | Typ _ ->
-        true
+        false
     | Load {exp} | Field {exp} ->
-        do_not_contain_regular_call exp
+        contain_regular_call exp
     | Index (exp1, exp2) ->
-        do_not_contain_regular_call exp1 && do_not_contain_regular_call exp2
+        contain_regular_call exp1 || contain_regular_call exp2
+    | If {cond; then_; else_} ->
+        BoolExp.contain_regular_call cond || contain_regular_call then_
+        || contain_regular_call else_
     | Call {proc; args} ->
-        ProcDecl.is_not_regular_proc proc && List.for_all args ~f:do_not_contain_regular_call
+        Stdlib.not (ProcDecl.is_not_regular_proc proc) || List.exists args ~f:contain_regular_call
     | Apply {closure; args} ->
-        do_not_contain_regular_call closure && List.for_all args ~f:do_not_contain_regular_call
+        contain_regular_call closure || List.exists args ~f:contain_regular_call
     | Closure {captured} ->
-        List.for_all captured ~f:do_not_contain_regular_call
+        List.exists captured ~f:contain_regular_call
 
 
   let vars exp =
@@ -970,6 +1064,8 @@ module Exp = struct
           acc
       | Load {exp} | Field {exp} ->
           aux acc exp
+      | If _ ->
+          L.die InternalError "TODO: Textual If statement"
       | Index (exp1, exp2) ->
           aux (aux acc exp1) exp2
       | Apply {closure; args} ->
@@ -982,7 +1078,13 @@ module Exp = struct
     aux Ident.Set.empty exp
 end
 
-module BoolExp = struct
+and BoolExp : sig
+  type t = Exp of Exp.t | Not of t | And of t * t | Or of t * t
+
+  val contain_regular_call : t -> bool
+
+  val pp : F.formatter -> t -> unit [@@warning "-unused-value-declaration"]
+end = struct
   type t = Exp of Exp.t | Not of t | And of t * t | Or of t * t
 
   let rec pp fmt bexp =
@@ -997,14 +1099,14 @@ module BoolExp = struct
         F.fprintf fmt "(%a) || (%a)" pp bexp1 pp bexp2
 
 
-  let rec do_not_contain_regular_call bexp =
+  let rec contain_regular_call bexp =
     match bexp with
     | Exp exp ->
-        Exp.do_not_contain_regular_call exp
+        Exp.contain_regular_call exp
     | Not bexp ->
-        do_not_contain_regular_call bexp
+        contain_regular_call bexp
     | Or (bexp1, bexp2) | And (bexp1, bexp2) ->
-        do_not_contain_regular_call bexp1 && do_not_contain_regular_call bexp2
+        contain_regular_call bexp1 || contain_regular_call bexp2
 end
 
 module Instr = struct
@@ -1047,16 +1149,16 @@ module Instr = struct
   let is_ready_for_to_sil_conversion i =
     match i with
     | Load {exp} ->
-        Exp.do_not_contain_regular_call exp
+        not (Exp.contain_regular_call exp)
     | Store {exp1; exp2} ->
-        Exp.do_not_contain_regular_call exp1 && Exp.do_not_contain_regular_call exp2
+        (not (Exp.contain_regular_call exp1)) && not (Exp.contain_regular_call exp2)
     | Prune {exp} ->
-        Exp.do_not_contain_regular_call exp
+        not (Exp.contain_regular_call exp)
     | Let {exp= Call {proc; args= []}} when ProcDecl.is_type_builtin proc ->
         true
     | Let {exp= Call {proc; args}} ->
         (not (ProcDecl.is_not_regular_proc proc))
-        && List.for_all args ~f:Exp.do_not_contain_regular_call
+        && not (List.exists args ~f:Exp.contain_regular_call)
     | Let {exp= _} ->
         false
 end
@@ -1092,15 +1194,15 @@ module Terminator = struct
         F.pp_print_string fmt "unreachable"
 
 
-  let rec do_not_contain_regular_call t =
+  let rec contain_regular_call t =
     match t with
     | If {bexp; then_; else_} ->
-        BoolExp.do_not_contain_regular_call bexp
-        && do_not_contain_regular_call then_ && do_not_contain_regular_call else_
+        BoolExp.contain_regular_call bexp || contain_regular_call then_
+        || contain_regular_call else_
     | Ret exp | Throw exp ->
-        Exp.do_not_contain_regular_call exp
+        Exp.contain_regular_call exp
     | Jump _ | Unreachable ->
-        true
+        false
 end
 
 module Node = struct
@@ -1123,7 +1225,7 @@ module Node = struct
 
   (* see the specification of Instr.is_ready_for_to_sil_conversion above *)
   let is_ready_for_to_sil_conversion node =
-    Terminator.do_not_contain_regular_call node.last
+    (not (Terminator.contain_regular_call node.last))
     && List.for_all node.instrs ~f:Instr.is_ready_for_to_sil_conversion
 
 
@@ -1165,6 +1267,7 @@ module ProcDesc = struct
   type t =
     { procdecl: ProcDecl.t
     ; nodes: Node.t list
+    ; fresh_ident: Ident.t option
     ; start: NodeName.t
     ; params: VarName.t list
     ; locals: (VarName.t * Typ.annotated) list
